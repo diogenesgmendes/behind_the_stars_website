@@ -1,0 +1,18 @@
+[theme]
+# The warm terracotta orange used for primary buttons/pills
+primaryColor = "#BF5C3E"
+
+# The slightly warm, off-white background of the main app
+backgroundColor = "#F0EFE9"
+
+# The pure white used for the cards/containers
+secondaryBackgroundColor = "#FFFFFF"
+
+# The dark charcoal/grey for text and headers
+textColor = "#31333F"
+
+# Streamlit allows "sans serif", "serif", or "monospace"
+# To use the specific "Space Grotesk" from the image,
+# you typically need to inject CSS or use a custom build,
+# but setting this to "sans serif" is the standard starting point.
+font = "sans serif"
