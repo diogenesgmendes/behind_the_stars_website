@@ -447,9 +447,7 @@ with tab2:
 
     with st.container(border=True):
         st.subheader("Real-time Analysis")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Sentiment Score", round(sentiment, 2))
-        c2.metric("Sentiment Label", label)
+        c3, c4 = st.columns(2)
         c3.metric("Predicted Closure Risk", f"{risk*100:.1f}%")
 
         with c4:
