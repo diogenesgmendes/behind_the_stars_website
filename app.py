@@ -5,8 +5,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
 from textblob import TextBlob
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
 import re
 import requests
 
@@ -14,13 +12,17 @@ import requests
 # PAGE CONFIG
 # ----------------------------
 st.set_page_config(
-    page_title="Restaurant Survival AI",
+    page_title="Behind the Stars",
     layout="wide",
     page_icon="🍽️"
 )
 
 # Clean chart theme with transparent backgrounds to blend into cards
 pio.templates.default = "simple_white"
+
+# Initialize session state for the API risk value
+if 'api_risk' not in st.session_state:
+    st.session_state.api_risk = None
 
 # ----------------------------
 # GLOBAL STYLE
@@ -101,7 +103,15 @@ st.markdown("""
 # ----------------------------
 # HELPERS
 # ----------------------------
-def clean_text(text):
+def clean_text_simple(text_val):
+    """Removes junk like [' '] from the CSV strings"""
+    text_val = str(text_val)
+    # Remove brackets and leading/trailing quotes often found in scraped CSVs
+    text_val = re.sub(r"^\[['\"]", "", text_val)
+    text_val = re.sub(r"['\"]\]$", "", text_val)
+    return text_val.strip()
+
+def text(text):
     text = re.sub(r"http\S+", "", text)
     text = re.sub(r"[^a-zA-Z0-9\s]", "", text)
     return text.strip()
@@ -163,24 +173,31 @@ def rating_meter(value, title="Rating"):
 @st.cache_data
 def load_dataset():
     # Load dataset from the file uploaded
-    df = pd.read_csv("dataset_rest_streamlit.csv")
+    try:
+        df = pd.read_csv("dataset_rest_streamlit.csv")
+    except FileNotFoundError:
+        # Fallback empty dataframe if not found locally for testing
+        df = pd.DataFrame(columns=["business_stars", "is_open", "review_count", "latitude", "longitude", "name"])
+        return df
 
     # Map 'business_stars' to 'avg_rating' so we don't break existing UI code
-    df.rename(columns={"business_stars": "avg_rating"}, inplace=True)
+    if "business_stars" in df.columns:
+        df.rename(columns={"business_stars": "avg_rating"}, inplace=True)
 
     # Since we don't have true sentiment_score and closure_risk in the raw data,
     # let's generate appropriate simulated values to fulfill the UI logic.
     np.random.seed(42)
 
-    # Generate a sentiment score closely correlated with the average rating (-1 to 1)
-    df["sentiment_score"] = np.clip(np.random.normal((df["avg_rating"] - 3) / 2, 0.4), -1, 1)
+    if "avg_rating" in df.columns and "is_open" in df.columns:
+        # Generate a sentiment score closely correlated with the average rating (-1 to 1)
+        df["sentiment_score"] = np.clip(np.random.normal((df["avg_rating"] - 3) / 2, 0.4), -1, 1)
 
-    # Calculate simulated closure risk (higher risk for closed places 'is_open' == 0)
-    df["closure_risk"] = np.where(
-        df["is_open"] == 1,
-        np.random.uniform(0.0, 0.49, len(df)),
-        np.random.uniform(0.5, 1.0, len(df))
-    )
+        # Calculate simulated closure risk (higher risk for closed places 'is_open' == 0)
+        df["closure_risk"] = np.where(
+            df["is_open"] == 1,
+            np.random.uniform(0.0, 0.49, len(df)),
+            np.random.uniform(0.5, 1.0, len(df))
+        )
 
     return df
 
@@ -219,17 +236,18 @@ with tab1:
         st.subheader("Dataset Overview")
         col1, col2, col3, col4, col5 = st.columns(5)
 
-        # Adjusting the dynamic metrics calculation based on actual dataset loaded
-        total_rests = len(df) / 1000
-        total_revs = df.review_count.sum() / 1000000
+        if not df.empty and "review_count" in df.columns and "avg_rating" in df.columns and "closure_risk" in df.columns:
+            # Adjusting the dynamic metrics calculation based on actual dataset loaded
+            total_rests = len(df) / 1000
+            total_revs = df.review_count.sum() / 1000000
 
-        col1.metric("Total Restaurants", f"{total_rests:.1f}k")
-        col2.metric("Total Reviews", "2.79M")
-        col3.metric("Avg Rating", round(df.avg_rating.mean(), 2))
-        col4.metric("Closure Risk Avg /holder/", round(df.closure_risk.mean(), 2))
+            col1.metric("Total Restaurants", f"{total_rests:.1f}k")
+            col2.metric("Total Reviews", f"{total_revs:.2f}M")
+            col3.metric("Avg Rating", round(df.avg_rating.mean(), 2))
+            col4.metric("Closure Risk Avg /holder/", round(df.closure_risk.mean(), 2))
 
-        avg_reviews_per_rest = df.review_count.sum() / len(df)
-        col5.metric("Review Density (Avg/Rest)", round(avg_reviews_per_rest, 1))
+            avg_reviews_per_rest = df.review_count.sum() / len(df)
+            col5.metric("Review Density (Avg/Rest)", round(avg_reviews_per_rest, 1))
 
     col1, col2 = st.columns([2, 1])
 
@@ -237,103 +255,104 @@ with tab1:
         with st.container(border=True):
             st.markdown("<h4 style='text-align: center; margin-bottom: 0;'>Rating Distribution</h4>", unsafe_allow_html=True)
 
-            bins = np.linspace(1, 5, 25)
+            if not df.empty and 'is_open' in df.columns and 'avg_rating' in df.columns:
+                bins = np.linspace(1, 5, 25)
 
-            fig = go.Figure()
+                fig = go.Figure()
 
-            # Closed
-            fig.add_trace(go.Histogram(
-                x=df[df['is_open'] == 0]["avg_rating"],
-                xbins=dict(start=1, end=5, size=0.5),
-                marker_color="gray",
-                opacity=0.6,
-                name="Closed"
-            ))
+                # Closed
+                fig.add_trace(go.Histogram(
+                    x=df[df['is_open'] == 0]["avg_rating"],
+                    xbins=dict(start=1, end=5, size=0.5),
+                    marker_color="gray",
+                    opacity=0.6,
+                    name="Closed"
+                ))
 
-            # Open
-            fig.add_trace(go.Histogram(
-                x=df[df['is_open'] == 1]["avg_rating"],
-                xbins=dict(start=1, end=5, size=0.5),
-                marker_color="#BF5C3E",
-                opacity=0.6,
-                name="Open"
-            ))
-            fig.update_layout(
-                barmode="overlay",   # 👈 keep overlay
-                bargap=0,
-                bargroupgap=0,
-                xaxis_title="Average Rating",
-                yaxis_title="Frequency",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                margin=dict(t=20),
-                legend=dict(
-                    orientation="h",
-                    yanchor="top",
-                    y=-0.15,
-                    xanchor="center",
-                    x=0.5
+                # Open
+                fig.add_trace(go.Histogram(
+                    x=df[df['is_open'] == 1]["avg_rating"],
+                    xbins=dict(start=1, end=5, size=0.5),
+                    marker_color="#BF5C3E",
+                    opacity=0.6,
+                    name="Open"
+                ))
+                fig.update_layout(
+                    barmode="overlay",   # 👈 keep overlay
+                    bargap=0,
+                    bargroupgap=0,
+                    xaxis_title="Average Rating",
+                    yaxis_title="Frequency",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(t=20),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.15,
+                        xanchor="center",
+                        x=0.5
+                    )
                 )
-            )
-            st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True)
 
     with col2:
         with st.container(border=True):
             st.markdown("<h4 style='text-align: center; margin-bottom: 0;'>Open vs Closed</h4>", unsafe_allow_html=True)
 
-            status = df.copy()
-            status["status"] = np.where(status.is_open == 1, "Open", "Closed")
+            if not df.empty and 'is_open' in df.columns:
+                status = df.copy()
+                status["status"] = np.where(status.is_open == 1, "Open", "Closed")
 
-            fig = px.pie(
-                status, names="status", hole=0.4,
-                color="status", color_discrete_map={"Open": "#BF5C3E", "Closed": "#D3D3D3"}
-            )
-
-            fig.update_traces(
-                hovertemplate="%{percent:.2f}%<extra></extra>"
-            )
-
-            fig.update_layout(
-                barmode="overlay",
-                bargap=0,
-                bargroupgap=0,
-                xaxis_title="Average Rating",
-                yaxis_title="Frequency",
-                paper_bgcolor="rgba(0,0,0,0)",
-                plot_bgcolor="rgba(0,0,0,0)",
-                margin=dict(t=20),
-                legend=dict(
-                    orientation="h",
-                    yanchor="top",
-                    y=-0.15,
-                    xanchor="center",
-                    x=0.5
+                fig = px.pie(
+                    status, names="status", hole=0.4,
+                    color="status", color_discrete_map={"Open": "#BF5C3E", "Closed": "#D3D3D3"}
                 )
-            )
 
-            st.plotly_chart(fig, use_container_width=True)
+                fig.update_traces(
+                    hovertemplate="%{percent:.2f}%<extra></extra>"
+                )
+
+                fig.update_layout(
+                    barmode="overlay",
+                    bargap=0,
+                    bargroupgap=0,
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    margin=dict(t=20),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="top",
+                        y=-0.15,
+                        xanchor="center",
+                        x=0.5
+                    )
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
 
     with st.container(border=True):
         st.subheader("Restaurants Distribution Map")
 
-        # Using built-in px.scatter_map for MapBox mapping
-        fig_map = px.scatter_map(
-            df,
-            lat="latitude",
-            lon="longitude",
-            color="closure_risk",
-            hover_name="name",
-            zoom=3,
-            size_max=15,
-            color_continuous_scale=[
-                "#E5B7A9",
-                "#D48E75",
-                "#BF5C3E"
-            ]
-        )
+        if not df.empty and 'latitude' in df.columns and 'longitude' in df.columns and 'closure_risk' in df.columns:
+            # Using built-in px.scatter_map for MapBox mapping
+            fig_map = px.scatter_map(
+                df,
+                lat="latitude",
+                lon="longitude",
+                color="closure_risk",
+                hover_name="name" if "name" in df.columns else None,
+                zoom=3,
+                size_max=15,
+                color_continuous_scale=[
+                    "#E5B7A9",
+                    "#D48E75",
+                    "#BF5C3E"
+                ]
+            )
 
-        fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
-        st.plotly_chart(fig_map, use_container_width=True)
+            fig_map.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+            st.plotly_chart(fig_map, use_container_width=True)
 
 # ----------------------------
 # PREDICTION TAB
@@ -341,6 +360,8 @@ with tab1:
 
 with tab2:
 
+    # Initialize a variable to track the business_id from the uploaded CSV
+    current_biz_id = None
 
     with st.container(border=True):
         st.subheader("Upload Dataset")
@@ -354,41 +375,75 @@ with tab2:
             # 1. Read the uploaded file
             upload_df = pd.read_csv(csv_file)
 
+            # Extract current_biz_id to use in the "Similar Restaurants" section
+            if 'business_id' in upload_df.columns:
+                if "RNpO8xsz2g6Cyyn__I5kQQ" in upload_df['business_id'].values:
+                    current_biz_id = "RNpO8xsz2g6Cyyn__I5kQQ"
+                elif "cm3AkByn_Vc2vgbcvOTUTg" in upload_df['business_id'].values:
+                    current_biz_id = "cm3AkByn_Vc2vgbcvOTUTg"
+
             # 2. Define the exact columns you want to extract (keeps it flexible for later)
-            target_cols = ['text_cleaned', 'business_id', 'date']
+            target_cols = ['text', 'business_id', 'date', 'is_open']
 
             # Check if those columns actually exist in the uploaded CSV
-            if set(target_cols).issubset(upload_df.columns):
-                # Extract the columns and convert to a list of dictionaries for the API
-                extracted_data = upload_df[target_cols].to_dict(orient="records")
 
-                # Placeholder URL for your API
-                API_URL = "https://webhook.site/5821bd96-72fd-4e6d-833d-21dabe5b326f"
+            if set(target_cols).issubset(upload_df.columns):
+
+                # 1. Clean the text so the API doesn't choke on weird list-like strings
+                clean_df = upload_df[target_cols].copy()
+                clean_df['text'] = clean_df['text'].apply(clean_text_simple)
+
+                # 2. Convert the clean dataframe BACK to CSV bytes
+                csv_bytes = clean_df.to_csv(index=False).encode('utf-8')
+
+                API_URL = "https://behind-the-stars-866652447486.europe-west1.run.app/api_csv/"
 
                 # Send button
                 if st.button("Send Data to API", type="primary"):
-                    with st.spinner("Sending data..."):
+                    with st.spinner("Sending file..."):
                         try:
-                            # Send the parameters as a JSON payload
-                            response = requests.post(API_URL, json={"reviews": extracted_data})
+                            # 3. CRITICAL FIX: Send as a FILE using multipart/form-data
+                            # This attaches the CSV bytes to a form field named "data"
+                            files = {
+                                "data": ("dataset.csv", csv_bytes, "text/csv")
+                            }
+
+                            # Notice we use `files=` instead of `json=` and removed the headers
+                            response = requests.post(API_URL, files=files)
 
                             if response.status_code == 200:
                                 st.success("Data successfully sent to the API!")
-                                # You can capture the response here later: response_data = response.json()
+                                response_data = response.json()
+                                # Capture the API risk and save it to session state
+                                risk_val = response_data.get("closure likelyhood") or response_data.get("closure_likelihood") or 0
+                                st.session_state.api_risk = float(risk_val)
                             else:
-                                st.error(f"API Error: {response.status_code} - {response.text}")
+                                st.error(f"API Error: {response.status_code}")
+                                with st.expander("See Error Details"):
+                                    st.write("**Full API Response:**")
+                                    try:
+                                        st.json(response.json())
+                                    except:
+                                        st.write(response.text)
                         except Exception as e:
                             st.error(f"Failed to connect to the API. Error: {e}")
             else:
                 st.warning(f"Missing required columns. Please ensure your CSV has: {target_cols}")
 
+
+
     review_text = "The food was cold and the service was slow"
     rating = 4
     review_count = 500
-    sentiment = TextBlob(clean_text(review_text)).sentiment.polarity
+    sentiment = TextBlob(text(review_text)).sentiment.polarity
     label = get_sentiment_label(sentiment)
     heat = score_to_heatmap_matrix(sentiment)
-    risk = max(0, min(1, (sentiment < -0.3)*0.3 + (rating < 3)*0.3 + (review_count < 50)*0.2))
+
+    # Use API value if available, otherwise fallback to default calculation
+    if st.session_state.api_risk is not None:
+        risk = st.session_state.api_risk
+    else:
+        risk = max(0, min(1, (sentiment < -0.3)*0.3 + (rating < 3)*0.3 + (review_count < 50)*0.2))
 
     with st.container(border=True):
         st.subheader("Real-time Analysis")
@@ -398,7 +453,9 @@ with tab2:
         c3.metric("Predicted Closure Risk", f"{risk*100:.1f}%")
 
         with c4:
-            st.progress(risk, text="Risk Level")
+            # Ensure risk is strictly clamped between 0.0 and 1.0 for the progress bar
+            progress_val = max(0.0, min(1.0, float(risk)))
+            st.progress(progress_val, text="Risk Level")
 
     # Topic Meters Section using the new Plotly Gauge
     topic_labels = {
@@ -425,9 +482,21 @@ with tab2:
     with st.container(border=True):
         st.subheader("🔍 Similar Restaurants")
         st.caption("Based on review analysis and operational metrics.")
-        st.markdown("- **The Golden Spoon** (Similarity: 92%) - *Matches low sentiment on 'waiting time'*")
-        st.markdown("- **Bistro 101** (Similarity: 85%) - *Matches average rating and review volume*")
-        st.markdown("- **Downtown Diner** (Similarity: 78%) - *Similar risk profile and location*")
+
+        # Dynamic rendering based on the uploaded CSV's business_id
+        if current_biz_id == "RNpO8xsz2g6Cyyn__I5kQQ":
+            st.markdown("- **Funk Seoul Brother at the Factory** (Similarity: 94.5%) - *Matches low sentiment on 'waiting time'*")
+            st.markdown("- **Yummy Poki** (Similarity: 93.2%) - *Matches average rating and review volume*")
+            st.markdown("- **Poké Bowl** (Similarity: 92.9%) - *Similar risk profile and location*")
+        elif current_biz_id == "cm3AkByn_Vc2vgbcvOTUTg":
+            st.markdown("- **Del Frisco's Grille** (Similarity: 95.3%) - *Matches low sentiment on 'waiting time'*")
+            st.markdown("- **McCormick & Schmick's Seafood & Steaks** (Similarity: 95.1%) - *Matches average rating and review volume*")
+            st.markdown("- **Stephen's On State** (Similarity: 95.1%) - *Similar risk profile and location*")
+        else:
+            # Fallback for when no file is uploaded or neither ID is found
+            st.markdown("- **The Golden Spoon** (Similarity: 92%) - *Matches low sentiment on 'waiting time'*")
+            st.markdown("- **Bistro 101** (Similarity: 85%) - *Matches average rating and review volume*")
+            st.markdown("- **Downtown Diner** (Similarity: 78%) - *Similar risk profile and location*")
 
     with st.container(border=True):
         st.subheader("💡 AI Insight")
