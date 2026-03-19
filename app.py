@@ -390,8 +390,23 @@ with tab2:
                                 st.session_state.api_response = response_data
 
                                 # Capture the API risk
-                                risk_val = response_data.get("closure_likelihood", 0)
-                                st.session_state.api_risk = float(risk_val)
+                                # NEW LOGIC:
+                                # 1. Safely get the 'proba' dictionary from the response
+                                proba_dict = response_data.get("proba", {})
+
+                                # 2. Check which key exists and apply the math
+                                if "open likelyhood" in proba_dict:
+                                    # If it's the probability of being OPEN, risk is 1 minus that value
+                                    risk_val = 1 - float(proba_dict["open likelyhood"])
+                                elif "closure likelyhood" in proba_dict:
+                                    # If it's already the probability of CLOSURE, use it directly
+                                    risk_val = float(proba_dict["closure likelyhood"])
+                                else:
+                                    # Fallback if neither key is found
+                                    risk_val = 0.0
+
+                                # 3. Save the result to session state
+                                st.session_state.api_risk = risk_val
 
                             else:
                                 st.error(f"API Error: {response.status_code}")
@@ -430,48 +445,65 @@ with tab2:
             st.progress(progress_val, text="Risk Level")
 
     # Topic Meters Section using the new Plotly Gauge
-    topic_labels = {
-        0: "food_quality", 1: "service", 2: "waiting_time", 3: "price_value",
-        4: "order_accuracy", 5: "cleanliness", 6: "atmosphere",
-        7: "location_access", 8: "management", 9: "portion_size"
-    }
+    target_sentiment_keys = [
+    "sentiment_food_quality", "sentiment_service", "sentiment_waiting_time",
+    "sentiment_price_value", "sentiment_order_accuracy", "sentiment_cleanliness",
+    "sentiment_atmosphere", "sentiment_location_access", "sentiment_management",
+    "sentiment_portion_size"
+    ]
 
     with st.container(border=True):
         st.subheader("Review Topic Analysis")
-        st.caption("Extracted sentiment drivers from customer reviews.")
+        st.caption("Sentiment drivers scaled from 0 (Negative) to 100 (Positive).")
 
-        row1 = st.columns(5)
-        row2 = st.columns(5)
+        if st.session_state.api_response and "topic_dico" in st.session_state.api_response:
+            topic_data = st.session_state.api_response["topic_dico"][0]
 
-        for i, (key, topic) in enumerate(topic_labels.items()):
-                    col = row1[i] if i < 5 else row2[i - 5]
-                    with col:
-                        # Use real API data if available, otherwise default to 0
-                        if st.session_state.api_response and topic in st.session_state.api_response:
-                            score = float(st.session_state.api_response[topic])
-                        else:
-                            score = np.random.randint(40, 95) # Fallback if API hasn't been called
+            # Filter for keys that exist in the JSON
+            found_topics = [k for k in target_sentiment_keys if k in topic_data]
+            display_topics = found_topics[:2] # Limit to top 2
 
-                        clean_name = topic.replace("_", " ").title()
-                        fig_gauge = rating_meter(score, title=clean_name)
-                        st.plotly_chart(fig_gauge, use_container_width=True, key=f"gauge_{i}")
+            if display_topics:
+                cols = st.columns(len(display_topics))
+                for i, topic_key in enumerate(display_topics):
+                    with cols[i]:
+                        # RESCALING: Convert -1/1 to 0/100
+                        raw_score = float(topic_data[topic_key])
+                        scaled_score = (raw_score + 1) * 50
+
+                        clean_name = topic_key.replace("sentiment_", "").replace("_", " ").title()
+                        fig_gauge = rating_meter(scaled_score, title=clean_name)
+                        st.plotly_chart(fig_gauge, use_container_width=True, key=f"gauge_{topic_key}")
+            else:
+                st.info("No specific sentiment topics found.")
+        else:
+            st.info("Upload a dataset to see the sentiment analysis.")
 
     with st.container(border=True):
         st.subheader("🔍 Similar Restaurants")
         st.caption("Based on review analysis and operational metrics.")
 
-        # Check if we have the API response and the similar_restaurants dictionary
-        if st.session_state.api_response and "similar_restaurants" in st.session_state.api_response:
-            sim_data = st.session_state.api_response["similar_restaurants"]
-            names = sim_data.get("name", {})
-            scores = sim_data.get("similarity_score", {})
+        # 1. Access the 'recommandation' key from your FASTAPI JSON
+        if st.session_state.api_response and "recommandation" in st.session_state.api_response:
+            recs = st.session_state.api_response["recommandation"]
 
-            # Loop through the dynamic keys (e.g., '3007', '1643')
-            for key in names.keys():
-                rest_name = names[key]
-                sim_score = scores[key] * 100 # Convert decimal to percentage
-                st.markdown(f"- **{rest_name}** (Similarity: {sim_score:.1f}%)")
+            if recs:
+                for item in recs:
+                    # 2. Extract the name and similarity score
+                    rest_name = item.get("name", "Unknown Restaurant")
+                    # Similarity is usually 0-1, so we multiply by 100 for display
+                    sim_score = item.get("similarity", 0) * 100
 
+                    # 3. Create a clean display row
+                    st.markdown(f"""
+                    <div style="padding: 10px; border-bottom: 1px solid #f0f2f6;">
+                        <strong>{rest_name}</strong> <br>
+                        <span style="color: #BF5C3E; font-family: 'Space Mono'; font-size: 0.9rem;">
+                            Match Score: {sim_score:.1f}%
+                        </span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.warning("No similar restaurants found.")
         else:
-            # Fallback for before the API is called
             st.info("Upload a dataset and send it to the API to see similar restaurants.")
