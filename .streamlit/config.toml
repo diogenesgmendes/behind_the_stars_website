@@ -3,7 +3,7 @@
 primaryColor = "#BF5C3E"
 
 # The slightly warm, off-white background of the main app
-backgroundColor = "#F0EFE9"
+backgroundColor = "#E9E9E0"
 
 # The pure white used for the cards/containers
 secondaryBackgroundColor = "#FFFFFF"

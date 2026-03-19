@@ -20,9 +20,11 @@ st.set_page_config(
 # Clean chart theme with transparent backgrounds to blend into cards
 pio.templates.default = "simple_white"
 
-# Initialize session state for the API risk value
+# Initialize session state for the API response and risk value
 if 'api_risk' not in st.session_state:
     st.session_state.api_risk = None
+if 'api_response' not in st.session_state:
+    st.session_state.api_response = None
 
 # ----------------------------
 # GLOBAL STYLE
@@ -116,26 +118,6 @@ def text(text):
     text = re.sub(r"[^a-zA-Z0-9\s]", "", text)
     return text.strip()
 
-def get_sentiment_label(score):
-    if score > 0.25: return "Positive"
-    if score < -0.25: return "Negative"
-    return "Neutral"
-
-def score_to_heatmap_matrix(score):
-    normalized = (score + 1) / 2
-    return np.array([
-        [normalized * 0.8, normalized * 0.9, normalized],
-        [normalized * 0.7, normalized * 0.85, normalized * 0.95],
-        [normalized * 0.65, normalized * 0.8, normalized * 0.9]
-    ])
-
-def generate_ai_explanation(sentiment, rating, review_count):
-    explanations = []
-    if sentiment < -0.3: explanations.append("Low overall sentiment highlights major customer dissatisfaction areas.")
-    if rating < 3: explanations.append("Below-average star rating is an immediate red flag for foot traffic.")
-    if review_count < 50: explanations.append("Low review volume indicates poor digital presence and visibility.")
-    explanations.append("Combined metrics reflect an elevated operational risk in current market conditions.")
-    return " ".join(explanations)
 
 # Custom Gauge Chart Function
 def rating_meter(value, title="Rating"):
@@ -210,22 +192,12 @@ df = load_dataset()
 st.markdown('<div class="hero-img">', unsafe_allow_html=True)
 
 try:
-    st.image("header2.jpeg", use_container_width=True)
+    st.image("header10.png", use_container_width=True)
 except:
     st.info("Header image placeholder (header2.jpeg not found)")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown(
-    "<h1 style='text-align:center;'>Behind The Stars</h1>",
-    unsafe_allow_html=True
-)
-st.markdown(
-    "<p style='text-align:center;'>Predict restaurant closure risk using early customer reviews and sentiment signals.</p>",
-    unsafe_allow_html=True
-)
-
-st.divider()
 tab1, tab2 = st.tabs(["Dataset Analysis", "Prediction Lab"])
 
 # ----------------------------
@@ -234,7 +206,7 @@ tab1, tab2 = st.tabs(["Dataset Analysis", "Prediction Lab"])
 with tab1:
     with st.container(border=True):
         st.subheader("Dataset Overview")
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col5 = st.columns(4)
 
         if not df.empty and "review_count" in df.columns and "avg_rating" in df.columns and "closure_risk" in df.columns:
             # Adjusting the dynamic metrics calculation based on actual dataset loaded
@@ -244,7 +216,6 @@ with tab1:
             col1.metric("Total Restaurants", f"{total_rests:.1f}k")
             col2.metric("Total Reviews", f"{total_revs:.2f}M")
             col3.metric("Avg Rating", round(df.avg_rating.mean(), 2))
-            col4.metric("Closure Risk Avg /holder/", round(df.closure_risk.mean(), 2))
 
             avg_reviews_per_rest = df.review_count.sum() / len(df)
             col5.metric("Review Density (Avg/Rest)", round(avg_reviews_per_rest, 1))
@@ -414,9 +385,14 @@ with tab2:
                             if response.status_code == 200:
                                 st.success("Data successfully sent to the API!")
                                 response_data = response.json()
-                                # Capture the API risk and save it to session state
-                                risk_val = response_data.get("closure likelyhood") or response_data.get("closure_likelihood") or 0
+
+                                # Save the FULL response to session state
+                                st.session_state.api_response = response_data
+
+                                # Capture the API risk
+                                risk_val = response_data.get("closure_likelihood", 0)
                                 st.session_state.api_risk = float(risk_val)
+
                             else:
                                 st.error(f"API Error: {response.status_code}")
                                 with st.expander("See Error Details"):
@@ -436,8 +412,6 @@ with tab2:
     rating = 4
     review_count = 500
     sentiment = TextBlob(text(review_text)).sentiment.polarity
-    label = get_sentiment_label(sentiment)
-    heat = score_to_heatmap_matrix(sentiment)
 
     # Use API value if available, otherwise fallback to default calculation
     if st.session_state.api_risk is not None:
@@ -470,33 +444,34 @@ with tab2:
         row2 = st.columns(5)
 
         for i, (key, topic) in enumerate(topic_labels.items()):
-            col = row1[i] if i < 5 else row2[i - 5]
-            with col:
-                mock_score = np.random.randint(40, 95)
-                clean_name = topic.replace("_", " ").title()
-                fig_gauge = rating_meter(mock_score, title=clean_name)
-                st.plotly_chart(fig_gauge, use_container_width=True, key=f"gauge_{i}")
+                    col = row1[i] if i < 5 else row2[i - 5]
+                    with col:
+                        # Use real API data if available, otherwise default to 0
+                        if st.session_state.api_response and topic in st.session_state.api_response:
+                            score = float(st.session_state.api_response[topic])
+                        else:
+                            score = np.random.randint(40, 95) # Fallback if API hasn't been called
+
+                        clean_name = topic.replace("_", " ").title()
+                        fig_gauge = rating_meter(score, title=clean_name)
+                        st.plotly_chart(fig_gauge, use_container_width=True, key=f"gauge_{i}")
 
     with st.container(border=True):
         st.subheader("🔍 Similar Restaurants")
         st.caption("Based on review analysis and operational metrics.")
 
-        # Dynamic rendering based on the uploaded CSV's business_id
-        if current_biz_id == "RNpO8xsz2g6Cyyn__I5kQQ":
-            st.markdown("- **Funk Seoul Brother at the Factory** (Similarity: 94.5%) - *Matches low sentiment on 'waiting time'*")
-            st.markdown("- **Yummy Poki** (Similarity: 93.2%) - *Matches average rating and review volume*")
-            st.markdown("- **Poké Bowl** (Similarity: 92.9%) - *Similar risk profile and location*")
-        elif current_biz_id == "cm3AkByn_Vc2vgbcvOTUTg":
-            st.markdown("- **Del Frisco's Grille** (Similarity: 95.3%) - *Matches low sentiment on 'waiting time'*")
-            st.markdown("- **McCormick & Schmick's Seafood & Steaks** (Similarity: 95.1%) - *Matches average rating and review volume*")
-            st.markdown("- **Stephen's On State** (Similarity: 95.1%) - *Similar risk profile and location*")
-        else:
-            # Fallback for when no file is uploaded or neither ID is found
-            st.markdown("- **The Golden Spoon** (Similarity: 92%) - *Matches low sentiment on 'waiting time'*")
-            st.markdown("- **Bistro 101** (Similarity: 85%) - *Matches average rating and review volume*")
-            st.markdown("- **Downtown Diner** (Similarity: 78%) - *Similar risk profile and location*")
+        # Check if we have the API response and the similar_restaurants dictionary
+        if st.session_state.api_response and "similar_restaurants" in st.session_state.api_response:
+            sim_data = st.session_state.api_response["similar_restaurants"]
+            names = sim_data.get("name", {})
+            scores = sim_data.get("similarity_score", {})
 
-    with st.container(border=True):
-        st.subheader("💡 AI Insight")
-        explanation = generate_ai_explanation(sentiment, rating, review_count)
-        st.info(explanation, icon="🧠")
+            # Loop through the dynamic keys (e.g., '3007', '1643')
+            for key in names.keys():
+                rest_name = names[key]
+                sim_score = scores[key] * 100 # Convert decimal to percentage
+                st.markdown(f"- **{rest_name}** (Similarity: {sim_score:.1f}%)")
+
+        else:
+            # Fallback for before the API is called
+            st.info("Upload a dataset and send it to the API to see similar restaurants.")
