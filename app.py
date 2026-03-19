@@ -105,13 +105,6 @@ st.markdown("""
 # ----------------------------
 # HELPERS
 # ----------------------------
-def clean_text_simple(text_val):
-    """Removes junk like [' '] from the CSV strings"""
-    text_val = str(text_val)
-    # Remove brackets and leading/trailing quotes often found in scraped CSVs
-    text_val = re.sub(r"^\[['\"]", "", text_val)
-    text_val = re.sub(r"['\"]\]$", "", text_val)
-    return text_val.strip()
 
 def text(text):
     text = re.sub(r"http\S+", "", text)
@@ -125,7 +118,7 @@ def rating_meter(value, title="Rating"):
         mode="gauge+number",
         value=value,
         title={'text': title, 'font': {'size': 14}},
-        number={'font': {'size': 20, 'family': 'Space Mono'}},
+        number={'font': {'size': 20, 'family': 'Space Mono'}, 'valueformat': '.1f'},
         gauge={
             'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "#333"},
             'bar': {'color': "#BF5C3E"},
@@ -198,12 +191,12 @@ except:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["Dataset Analysis", "Prediction Lab"])
+tab1, tab2 = st.tabs(["Prediction Lab", "Dataset Analysis"])
 
 # ----------------------------
 # DATASET TAB
 # ----------------------------
-with tab1:
+with tab2:
     with st.container(border=True):
         st.subheader("Dataset Overview")
         col1, col2, col3, col5 = st.columns(4)
@@ -329,7 +322,7 @@ with tab1:
 # PREDICTION TAB
 # ----------------------------
 
-with tab2:
+with tab1:
 
     # Initialize a variable to track the business_id from the uploaded CSV
     current_biz_id = None
@@ -346,13 +339,6 @@ with tab2:
             # 1. Read the uploaded file
             upload_df = pd.read_csv(csv_file)
 
-            # Extract current_biz_id to use in the "Similar Restaurants" section
-            if 'business_id' in upload_df.columns:
-                if "RNpO8xsz2g6Cyyn__I5kQQ" in upload_df['business_id'].values:
-                    current_biz_id = "RNpO8xsz2g6Cyyn__I5kQQ"
-                elif "cm3AkByn_Vc2vgbcvOTUTg" in upload_df['business_id'].values:
-                    current_biz_id = "cm3AkByn_Vc2vgbcvOTUTg"
-
             # 2. Define the exact columns you want to extract (keeps it flexible for later)
             target_cols = ['text', 'business_id', 'date', 'is_open']
 
@@ -362,7 +348,6 @@ with tab2:
 
                 # 1. Clean the text so the API doesn't choke on weird list-like strings
                 clean_df = upload_df[target_cols].copy()
-                clean_df['text'] = clean_df['text'].apply(clean_text_simple)
 
                 clean_df['Unnamed: 0'] = clean_df.index
 
@@ -448,10 +433,10 @@ with tab2:
 
     # Topic Meters Section using the new Plotly Gauge
     target_sentiment_keys = [
-    "sentiment_food_quality", "sentiment_service", "sentiment_waiting_time",
-    "sentiment_price_value", "sentiment_order_accuracy", "sentiment_cleanliness",
-    "sentiment_atmosphere", "sentiment_location_access", "sentiment_management",
-    "sentiment_portion_size"
+        "sentiment_food_quality", "sentiment_service", "sentiment_waiting_time",
+        "sentiment_price_value", "sentiment_order_accuracy", "sentiment_cleanliness",
+        "sentiment_atmosphere", "sentiment_location_access", "sentiment_management",
+        "sentiment_portion_size"
     ]
 
     with st.container(border=True):
@@ -463,17 +448,22 @@ with tab2:
 
             # Filter for keys that exist in the JSON
             found_topics = [k for k in target_sentiment_keys if k in topic_data]
-            display_topics = found_topics[:2] # Limit to top 2
 
-            if display_topics:
-                cols = st.columns(len(display_topics))
-                for i, topic_key in enumerate(display_topics):
+            # REMOVED THE [:2] SLICE HERE to display all found topics
+            if found_topics:
+                # Create exactly as many columns as there are topics
+                cols = st.columns(len(found_topics))
+
+                for i, topic_key in enumerate(found_topics):
                     with cols[i]:
                         # RESCALING: Convert -1/1 to 0/100
                         raw_score = float(topic_data[topic_key])
                         scaled_score = (raw_score + 1) * 50
 
+                        # Clean up the name for the chart title
                         clean_name = topic_key.replace("sentiment_", "").replace("_", " ").title()
+
+                        # Generate and render the gauge chart
                         fig_gauge = rating_meter(scaled_score, title=clean_name)
                         st.plotly_chart(fig_gauge, use_container_width=True, key=f"gauge_{topic_key}")
             else:
@@ -509,3 +499,14 @@ with tab2:
                 st.warning("No similar restaurants found.")
         else:
             st.info("Upload a dataset and send it to the API to see similar restaurants.")
+
+# ----------------------------
+#    # DEBUG: RAW API RESPONSE
+#    # ----------------------------
+#    st.markdown("---") # Adds a nice visual divider
+#    with st.expander("🛠️ View Raw API Response JSON"):
+#        if st.session_state.api_response:
+#            # st.json automatically formats dictionaries beautifully
+#            st.json(st.session_state.api_response)
+#        else:
+#            st.info("No API data yet. Upload a CSV and click 'Send Data to API' to see the JSON payload.")
