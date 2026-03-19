@@ -364,6 +364,8 @@ with tab2:
                 clean_df = upload_df[target_cols].copy()
                 clean_df['text'] = clean_df['text'].apply(clean_text_simple)
 
+                clean_df['Unnamed: 0'] = clean_df.index
+
                 # 2. Convert the clean dataframe BACK to CSV bytes
                 csv_bytes = clean_df.to_csv(index=False).encode('utf-8')
 
