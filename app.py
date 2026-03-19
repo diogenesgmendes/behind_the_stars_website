@@ -140,8 +140,8 @@ def rating_meter(value, title="Rating"):
     ))
 
     fig.update_layout(
-        height=180,
-        margin=dict(l=10, r=10, t=30, b=10),
+        height=200,
+        margin=dict(l=10, r=10, t=50, b=10),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font={'family': "Space Grotesk, sans-serif"}
